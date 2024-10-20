@@ -1,8 +1,12 @@
+environment:
+  - CS-DEL-SS/dev
 config:
   CS-DEL-SS:adminUsername: cs_admin
   CS-DEL-SS:osImage: MicrosoftWindowsServer:WindowsServer:2022-datacenter-azure-edition:latest
   CS-DEL-SS:servicePort: "3389"
   CS-DEL-SS:vmName: del-ss-dc
   CS-DEL-SS:vmSize: Standard_B2s
-  azure-native:location: EastUS2
+  azure-native:location: EastUS
+  pulumi:tags:
+    pulumi:template: vm-azure-python
   pulumi:template: vm-azure-python
