@@ -32,14 +32,12 @@ vnet_name = "vnet-CyberSolve-Labs"
 resource_group = resources.get_resource_group(resource_group_name="rg-CyberSolve-Labs")
 # pulumi.export("RG:", resource_group)
 
-# # Locate the "vnet-CyberSolve-Labs" virtual Network
-# vnet = network.get_virtual_network(
-#     "vNet-CyberSolve-Labs",
-#     resource_group_name=resource_group.name,
-#     virtual_network_name="vNet-CyberSolve-Labs",
-# )
 
-vnet: pulumi.Output[GetVirtualNetworkResult] = get_virtual_network_output(
+vnet_output: pulumi.Output[GetVirtualNetworkResult] = get_virtual_network_output(
+    resource_group_name=resource_group.name, virtual_network_name=vnet_name
+)
+
+vnet = network.get_virtual_network(
     resource_group_name=resource_group.name, virtual_network_name=vnet_name
 )
 
@@ -76,7 +74,7 @@ def get_next_subnet_prefix(vnet: GetVirtualNetworkResult) -> str:
     )
 
 
-new_subnet_prefix: pulumi.Output[str] = vnet.apply(get_next_subnet_prefix)
+# new_subnet_prefix: pulumi.Output[str] = vnet.apply(get_next_subnet_prefix)
 
 # if network.get_subnet(
 #     resource_group_name=resource_group.name,
@@ -99,22 +97,39 @@ new_subnet_prefix: pulumi.Output[str] = vnet.apply(get_next_subnet_prefix)
 
 subnet: network.Subnet
 
+# try:
+#     print("trying....")
+#     subnet = network.get_subnet(
+#         resource_group_name=resource_group.name,
+#         subnet_name="CS-DEL-subnet-" + pulumi.get_stack(),
+#         virtual_network_name=vnet_name,
+#     )
+# except:
+#     print("Got to the except")
+
+sub_info = None
+
 try:
-    print("trying....")
-    subnet = network.get_subnet(
+    sub_info = network.get_subnet(
         resource_group_name=resource_group.name,
         subnet_name="CS-DEL-subnet-" + pulumi.get_stack(),
         virtual_network_name=vnet_name,
     )
 except:
-    print("Got to the except")
-    subnet = network.Subnet(
-        address_prefix=new_subnet_prefix,
-        resource_name="CS-DEL-subnet-" + pulumi.get_stack(),
-        resource_group_name=resource_group.name,
-        subnet_name="CS-DEL-subnet-" + pulumi.get_stack(),
-        virtual_network_name=vnet_name,
-    )
+    pass
+
+
+subnet = network.Subnet(
+    address_prefix=(
+        sub_info.address_prefix
+        if sub_info != None
+        else vnet_output.apply(get_next_subnet_prefix)
+    ),
+    resource_name="CS-DEL-subnet-" + pulumi.get_stack(),
+    resource_group_name=resource_group.name,
+    subnet_name="CS-DEL-subnet-" + pulumi.get_stack(),
+    virtual_network_name=vnet_name,
+)
 
 
 network_security_group = network.NetworkSecurityGroup(
@@ -147,36 +162,42 @@ def build_computer_resource(
     # Check for Extras
     if "PIP" in vm_extras:
         print("Configuring PIP!")
-        pip_config = {
-            "name": "CS-DEL-DC-pip-" + vm_name + pulumi.get_stack(),
-            "public_ip_allocation_method": "Static",
-        }
-
-    pass
+        pip_config = network.PublicIPAddress(
+            "CS-DEL-pip-" + vm_name + "-" + pulumi.get_stack(),
+            resource_group_name=resource_group.name,
+            public_ip_allocation_method="Static",
+            location=config.get("location"),
+        )
+        # pip_config = {
+        #     "name": "CS-DEL-pip-" + vm_name + "-" + pulumi.get_stack(),
+        #     "public_ip_allocation_method": "Static",
+        # }
 
     # # Build the NIC
     nic = network.NetworkInterface(
         resource_name="CS-DEL-nic-" + vm_name + "-" + pulumi.get_stack(),
         resource_group_name=resource_group.name,
-        network_interface_name="CS-DEL-nic-" + vm_name + "-" + pulumi.get_stack(),
         ip_configurations=[
-            {
-                "name": "CS-DEL-DC-ipconfig-" + pulumi.get_stack(),
-                "primary": True,
-                "public_ip_allocation_configuration": pip_config,
-                "subnet": network.SubnetArgs(id=subnet.id),
-            }
+            network.NetworkInterfaceIPConfigurationArgs(
+                name="ipConfig",
+                subnet=network.SubnetArgs(id=subnet.id),
+                private_ip_allocation_method="Dynamic",
+                public_ip_address=network.PublicIPAddressArgs(id=pip_config.id),
+            ),
         ],
     )
 
     # Build the Virtual Machine Object from assembled parts
-    obj = compute.VirtualMachineArgs(
+    vm_args = compute.VirtualMachineArgs(
         resource_group_name=resource_group.name,
+        diagnostics_profile=compute.DiagnosticsProfileArgs(
+            boot_diagnostics=compute.BootDiagnosticsArgs(enabled=True)
+        ),
         hardware_profile=compute.HardwareProfileArgs(vm_size=roles[vm_type]["vmSize"]),
         network_profile=compute.NetworkProfileArgs(
             network_interfaces=[
-                compute.NetworkInterfaceReferenceArgs(id=nic.id, primary=True),
-            ],
+                compute.NetworkInterfaceReferenceArgs(id=nic.id, primary=True)
+            ]
         ),
         os_profile=compute.OSProfileArgs(
             admin_password=config.get("adminPassword"),
@@ -192,15 +213,74 @@ def build_computer_resource(
                 "managed_disk": {
                     "storage_account_type": compute.StorageAccountTypes.STANDARD_LRS,
                 },
-                "name": "CS-DEL-DC-osDisk-" + vm_name + "-" + pulumi.get_stack(),
+                "name": "CS-DEL-osDisk-" + vm_name + "-" + pulumi.get_stack(),
             },
         },
-        vm_name="CS-DEL-" + vm_type + "-" + pulumi.get_stack(),
+        vm_name="CS-DEL-vm-" + vm_name + "-" + pulumi.get_stack(),
     )
-    new_obj = compute.VirtualMachine(
-        resource_name="CS-DEL-" + vm_type + "-" + pulumi.get_stack(),
-        args=obj,
+    vm = compute.VirtualMachine(
+        resource_name="CS-DEL-vm-" + vm_name + "-" + pulumi.get_stack(),
+        args=vm_args,
     )
+
+    vm_dsc = compute.VirtualMachineRunCommandByVirtualMachine(
+        "CS-DEL-vmdsc-" + vm_name + "-" + pulumi.get_stack(),
+        resource_group_name=resource_group.name,
+        vm_name=vm.name,
+        source=compute.VirtualMachineRunCommandScriptSourceArgs(
+            # script="type NUL > C:\\test.txt"
+            script="""
+Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force;
+Install-Module ActiveDirectoryDSC -Force;
+
+Configuration makeDomain {
+    Import-DscResource -ModuleName PSDesiredStateConfiguration ;
+    Import-DscResource -ModuleName ActiveDirectoryDSC ;
+
+    $username = "cs_admin";
+    $password = "Cyb3rS0lve!!";
+
+    # Convert the password string to a secure string
+    $securePassword = ConvertTo-SecureString -String $password -AsPlainText -Force;
+
+    # Create the PSCredential object
+    $credential = New-Object System.Management.Automation.PSCredential -ArgumentList $username, $securePassword;
+
+    Node 'localhost' { 
+        WindowsFeature 'ADDS'
+        {
+            Name = 'AD-Domain-Services'
+            Ensure = 'Present'
+            IncludeAllSubFeature = $True
+        }
+
+        ADDomain 'spslab.local'
+        {
+            DomainName = 'spslab.local'
+            Credential = $Credential
+            SafemodeAdministratorPassword = $Credential
+            ForestMode = 'WinThreshold'
+        }
+    } 
+}
+
+$cd = @{ 
+    AllNodes = @( 
+        @{ 
+            NodeName = 'localhost' 
+            PSDscAllowDomainUser = $true
+            PSDscAllowPlainTextPassword = $true 
+        } 
+    ) 
+}
+
+makeDomain -OutputPath 'C:\\DSC' -ConfigurationData $cd
+
+Start-DscConfiguration 'C:\\DSC' -Wait -Verbose
+"""
+        ),
+    )
+
     pass
 
 

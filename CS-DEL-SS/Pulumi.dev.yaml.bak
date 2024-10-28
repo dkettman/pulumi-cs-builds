@@ -1,0 +1,3 @@
+environment:
+  - DKettmann/SecretServer
+  - CS-DEL-SS/dev
