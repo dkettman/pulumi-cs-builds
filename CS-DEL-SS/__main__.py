@@ -194,7 +194,7 @@ def build_computer_resource(
         tags={
             "Owner": config.get("Owner"),
             "Email": config.get("Email"),
-            "Extras": roles[s]["extras"],
+            "Extras": str(roles[s]["extras"]),
         },
     )
     vm = compute.VirtualMachine(
