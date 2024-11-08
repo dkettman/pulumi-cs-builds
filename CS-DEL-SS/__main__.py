@@ -41,6 +41,9 @@ vnet = network.get_virtual_network(
     resource_group_name=resource_group.name, virtual_network_name=vnet_name
 )
 
+def get_resource_name(arg) -> str:
+    #        subnet_name="CS-DEL-subnet-" + pulumi.get_stack(),
+    return 
 
 def get_next_subnet_prefix(vnet: GetVirtualNetworkResult) -> str:
     if not vnet.address_space or not vnet.address_space.address_prefixes:
